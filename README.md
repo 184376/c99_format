@@ -3,10 +3,6 @@
 c99 standard (ISO/IEC 9899:1999) printf like format function with custom output callback,
 it take a format string and optional arguments and produce a formatted sequence of characters for output callback
 <br>
-#include <stdint.h>
-<br>
-#include <stdarg.h>
-<br>
 typedef char ichar;
 <br>
 typedef intptr_t(*OslFormatWriteFunc)(void* arg, const ichar* sz, intptr_t len);
