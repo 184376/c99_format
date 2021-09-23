@@ -14,19 +14,27 @@ typedef intptr_t(*OslFormatWriteFunc)(void* arg, const ichar* sz, intptr_t len);
 intptr_t osl_vformat(OslFormatWriteFunc writefunc, void* arg, const ichar* format, va_list argptr);
 
 ```
-<br><font color="green">
- &nbsp;&nbsp;writefunc</font>:the output callback
+
+<br>
+## Parameters 
+* writefunc *
  <br>
- <font color="green">&nbsp;&nbsp;arg</font>:argument for writefunc
+The output callback
+ <br>
+ *arg*
+ <br>
+ Argument for output callback
  <br>
  <font color="green">&nbsp;&nbsp;format</font>:format string you can see on<a href="https://docs.microsoft.com/en-us/cpp/c-runtime-library/format-specification-syntax-printf-and-wprintf-functions?view=msvc-160"> MSDN</a> or <a href="https://linux.die.net/man/3/printf"> Liunx Man</a>
  <br>
- <font color="green">&nbsp;&nbsp;argptr</font>
-:from va_start()
+ *argptr*
  <br>
-<font color="green">&nbsp;&nbsp;return</font>:return the number of characters written, not including the terminating null character, or a negative value if an output error occurs. 
+Pointer to list of arguments.from va_start()
+ <br>
+##Return Value
+  Return the number of characters written, not including the terminating null character, or a negative value if an output error occurs. 
 <br>
-Example
+##Example
 
  ```c  
 struct vsnformat_data {
