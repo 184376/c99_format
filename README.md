@@ -17,7 +17,7 @@ intptr_t osl_vformat(OslFormatWriteFunc writefunc, void* arg, const ichar* forma
 
 <br>
 ## Parameters 
-* writefunc *
+*writefunc*
  <br>
 The output callback
  <br>
@@ -25,16 +25,18 @@ The output callback
  <br>
  Argument for output callback
  <br>
- <font color="green">&nbsp;&nbsp;format</font>:format string you can see on<a href="https://docs.microsoft.com/en-us/cpp/c-runtime-library/format-specification-syntax-printf-and-wprintf-functions?view=msvc-160"> MSDN</a> or <a href="https://linux.die.net/man/3/printf"> Liunx Man</a>
+ *format*
+ <br>
+ format string you can see on<a href="https://docs.microsoft.com/en-us/cpp/c-runtime-library/format-specification-syntax-printf-and-wprintf-functions?view=msvc-160"> MSDN</a> or <a href="https://linux.die.net/man/3/printf"> Liunx Man</a>
  <br>
  *argptr*
  <br>
 Pointer to list of arguments.from va_start()
  <br>
-##Return Value
+## Return Value
   Return the number of characters written, not including the terminating null character, or a negative value if an output error occurs. 
 <br>
-##Example
+## Example
 
  ```c  
 struct vsnformat_data {
