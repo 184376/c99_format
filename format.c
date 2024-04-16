@@ -1,149 +1,27 @@
-
  
-#include <math.h>
-#include <float.h> 
-#include <errno.h> 
+#include <string.h>   
+#include <errno.h>   
+#include <assert.h>  
+ 
 #include "format.h"
 
+#ifndef FALSE
+#define FALSE 0
+#endif // FALSE
+
+#ifndef TRUE
+#define TRUE 1
+#endif // TRUE
+
+
 #if defined(_WIN32) || defined(_WIN64)
-#define _OSL_WINDOWS
-#elif defined(__linux__)  
-#define _OLS_LINUX
-#elif  defined(__APPLE__) &&  defined(__MACH__)
-#define _OSL_MAC
-#if defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-#define _OSL_MAC_IOS
+#define _OS_WINDOWS 
 #endif
-#define _OSL_MAC_OSX
-#else 
-#error Unknown platform detected.
-#endif
+  
+#define NUMBER_BUFFER_LENGTH 511
+#define NUMBER_DEFAULT_PRECISION 6
+typedef int ibool;
 
-struct vsnformat_data {
-  ichar* buffer;
-  intptr_t count;
-};
-
-static intptr_t _osl_vsnformat_write(struct vsnformat_data* arg, const ichar* sz, intptr_t len) {
-  if (len >= arg->count) {
-    return -1;
-  }
-  memcpy(arg->buffer, sz, len * sizeof(ichar));
-  arg->buffer += len;
-  arg->count -= len;
-  return len;
-}
-
-int osl_vsnprintf(ichar* buffer, size_t count, const ichar* format, va_list ap) {
-  int rv;
-  struct vsnformat_data data;
-  if (buffer == NULL) {
-    return (int)osl_vformat(NULL, &data, format, ap);
-  }
-
-  data.buffer = buffer;
-  data.count = count;
-  rv = (int)osl_vformat((OslFormatWriteFunc)_osl_vsnformat_write, &data, format, ap);
-
-  if (rv < 0) {
-    buffer[0] = 0;
-  }
-  else {
-    if (rv == count) {
-      rv = (int)(count - 1);
-    }
-    buffer[rv] = 0;
-  }
-  return rv;
-}
-
-typedef struct vasnformat_data vasnformat_data;
-struct vasnformat_data {
-  intptr_t count; 
-  ichar* data; 
-  intptr_t capacity;
-};
-
-static intptr_t vasnformat_data_ensure_cap(vasnformat_data* self, intptr_t new_count) {
-  if (new_count <= self->capacity) {
-    return 1;
-  }
-#ifdef _grow_fixed_count
-  intptr_t new_cap = self->_capacity;
-  while (new_cap < new_count) {
-    new_cap += _grow_fixed_count;
-  }
-#undef _grow_fixed_count
-#else //!_grow_fixed_count
-  intptr_t new_cap = self->capacity << 1;
-  if (new_cap == 0)
-    new_cap = 16;
-  while (new_cap < new_count) {
-    new_cap <<= 1;
-  }
-#endif // #ifdef _grow_fixed_count
-
-  ichar* data = (ichar*)realloc(self->data, new_cap * sizeof(ichar));
-  if (NULL == data) {
-    return 0;
-  }
-  self->data = data;
-  self->capacity = new_cap;
-  return 1;
-}
-
-static intptr_t osl_vasprintf_write(vasnformat_data* arg, const ichar* sz, intptr_t len) {
-  if (!vasnformat_data_ensure_cap(arg, len))
-    return -1;
-  ichar*buf = arg->data + arg->count; 
-  memcpy(buf,sz,len*sizeof(ichar));
-  return len;
-}
-
-int osl_vasprintf(ichar** strp, const ichar* format, va_list argptr) {
-  int rv;
-  struct vasnformat_data data = {0,NULL,0};
-  rv = (int)osl_vformat((OslFormatWriteFunc)osl_vasprintf_write, &data, format, argptr); 
-  if (rv < 0) {
-    *strp = NULL;
-    if (data.data)
-      free(data.data);
-  }
-  else {
-    if (!vasnformat_data_ensure_cap(&data, 1)) {
-      if (data.data)
-        free(data.data);
-      return -1;
-    } 
-    data.data[data.count]=0; 
-    *strp = data.data;  
-  }
-  return rv;
-}
-
-int osl_snformat(ichar* buffer, intptr_t count, const ichar* format, ...) {
-  int rv;
-  struct vsnformat_data data;
-  va_list argptr;
-  data.buffer = buffer;
-  data.count = count;
-  va_start(argptr, format);
-  rv = (int)osl_vformat((OslFormatWriteFunc)_osl_vsnformat_write, &data, format, argptr);
-  va_end(argptr);
-  if (rv < 0) {
-    buffer[0] = 0;
-  }
-  else {
-    if (rv == count) {
-      rv = (int)(count - 1);
-    }
-    buffer[rv] = 0;
-  }
-  return rv;
-}
- 
-#define _OSL_NUMBER_BUFFER_LENGTH 511
-#define _OSL_NUMBER_DEFAULT_PRECISION 6
 typedef struct OslFormatter OslFormatter;
 struct OslFormatter {
   int width;
@@ -156,18 +34,18 @@ struct OslFormatter {
   ibool specifieris_upper;
    
   OslFormatWriteFunc writefunc;
-  void* arg;
+  void* userData;
   intptr_t count;
 
-  ichar tempbuf[_OSL_NUMBER_BUFFER_LENGTH + 1];
-  //ichar cvtbuf[_OSL_NUMBER_BUFFER_LENGTH + 1];
+  char tempbuf[NUMBER_BUFFER_LENGTH + 1];
+  //char cvtbuf[NUMBER_BUFFER_LENGTH + 1];
 };
 
-static intptr_t osl_vformat_null_write(void* arg, const ichar* sz, intptr_t len) {
+static intptr_t _vformat_null_write(void* arg, const char* sz, intptr_t len) {
   return len;
 }
  
-static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat, va_list argptr);
+static intptr_t _vformat_impl(OslFormatter* formatter, const char* szformat, va_list argptr);
 
 /// <summary>
 /// Writes the C string pointed by format 
@@ -180,22 +58,21 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
 /// </param>
 /// <param name="argptr"></param>
 /// <returns></returns>
-intptr_t osl_vformat(OslFormatWriteFunc writefunc, void* arg, const ichar* szformat, va_list argptr) {
+intptr_t osl_vformat(OslFormatWriteFunc writefunc, void* userData, const char* szformat, va_list argptr) {
   OslFormatter formatter;
   formatter.count = 0;
   formatter.writefunc = writefunc;
-  formatter.arg = arg;
+  formatter.userData = userData;
   if (writefunc == NULL)
-    formatter.writefunc = osl_vformat_null_write;
-  return _osl_vformat_impl(&formatter, szformat, argptr);
-}
-
-static const ichar _osl_digits_upper[] = "0123456789ABCDEF";
-static const ichar _osl_digits_lower[] = "0123456789abcdef";
-#define osl_int_str_buf_length 64
-#define osl_define_vformat_itoa(name,type,base)\
-static ichar* name(type value, ichar* buf) {\
-  ichar tmp[osl_int_str_buf_length];\
+    formatter.writefunc = _vformat_null_write;
+  return _vformat_impl(&formatter, szformat, argptr);
+}   
+static const char _digits_upper[] = "0123456789ABCDEF";
+static const char _digits_lower[] = "0123456789abcdef";
+#define INT_STR_BUF_LENGTH 64 
+#define DEFINE_ITOA(name,type,base)\
+static char* name(type value, char* buf) {\
+  char tmp[INT_STR_BUF_LENGTH];\
   int n = 0;\
   do {\
     tmp[n] = '0'+(value % base);\
@@ -203,8 +80,8 @@ static ichar* name(type value, ichar* buf) {\
     n++;\
   } while (value != 0);\
   n--;\
-  assert(n < osl_int_str_buf_length);\
-  ichar* pos = buf;\
+  assert(n < INT_STR_BUF_LENGTH);\
+  char* pos = buf;\
   for (int i = n; i >= 0; i--) {\
     *pos = tmp[i];\
     pos++;\
@@ -213,11 +90,11 @@ static ichar* name(type value, ichar* buf) {\
   return pos;\
 }
 
-#define osl_define_vformat_itoa16(name,type)\
-static ichar* name(type value, ichar* buf, ibool is_upper) {\
-  const ichar* digits;\
-  ichar tmp[osl_int_str_buf_length];\
-  digits = is_upper ? _osl_digits_upper : _osl_digits_lower;\
+#define DEFINE_ITOA16(name,type)\
+static char* name(type value, char* buf, ibool is_upper) {\
+  const char* digits;\
+  char tmp[INT_STR_BUF_LENGTH];\
+  digits = is_upper ? _digits_upper : _digits_lower;\
   int n = 0;\
   do {\
     tmp[n] = digits[value % 16];\
@@ -225,8 +102,8 @@ static ichar* name(type value, ichar* buf, ibool is_upper) {\
     n++;\
   } while (value != 0);\
   n--;\
-  assert(n < osl_int_str_buf_length);\
-  ichar* pos = buf;\
+  assert(n < INT_STR_BUF_LENGTH);\
+  char* pos = buf;\
   for (int i = n; i >= 0; i--) {\
     *pos = tmp[i];\
     pos++;\
@@ -235,31 +112,31 @@ static ichar* name(type value, ichar* buf, ibool is_upper) {\
   return pos;\
 }
  
-osl_define_vformat_itoa(_osl_vformat_utoa10, uint32_t, 10)
-osl_define_vformat_itoa(_osl_vformat_ultoa10, uint64_t, 10)
-osl_define_vformat_itoa16(_osl_vformat_ultoa16, uint64_t)
+DEFINE_ITOA(_vformat_u32toa10, uint32_t, 10)
+DEFINE_ITOA(_vformat_u64toa10, uint64_t, 10)
+DEFINE_ITOA16(_vformat_u64toa16, uint64_t)
 
-static ibool _osl_vformat_append(OslFormatter* formatter, const ichar* start, intptr_t len) {
+static ibool _vformat_append(OslFormatter* formatter, const char* start, intptr_t len) {
   if (len <= 0)
     return TRUE;
-  if (formatter->writefunc(formatter->arg, start, len) < 0)
+  if (formatter->writefunc(formatter->userData, start, len) < 0)
     return FALSE;
   formatter->count += len;
   return TRUE;
 }
 
-static ibool _osl_vformat_append_nchar(OslFormatter* formatter, ichar ch, intptr_t count) {
+static ibool _vformat_append_nchar(OslFormatter* formatter, char ch, intptr_t count) {
   if (count <= 0)
     return TRUE;
   for (intptr_t i = 0; i < count; i++) {
-    if (formatter->writefunc(formatter->arg, &ch, 1) < 0)
+    if (formatter->writefunc(formatter->userData, &ch, 1) < 0)
       return FALSE;
   }
   formatter->count += count;
   return TRUE;
 }
  
-static ibool _osl_vformat_append_with_prefix(OslFormatter* formatter, const ichar* prefix, int prefixLen, const ichar* digits, intptr_t len) {
+static ibool _vformat_append_with_prefix(OslFormatter* formatter, const char* prefix, int prefixLen, const char* digits, intptr_t len) {
 
   intptr_t padding_zero_count = formatter->precision - len;
   if (padding_zero_count < 0) {
@@ -278,36 +155,36 @@ static ibool _osl_vformat_append_with_prefix(OslFormatter* formatter, const icha
       padding_zero_count += padding_black_count;
       padding_black_count = 0;
     }
-    if (!_osl_vformat_append_nchar(formatter, ' ', padding_black_count))
+    if (!_vformat_append_nchar(formatter, ' ', padding_black_count))
       return FALSE;
-    if (prefix && !_osl_vformat_append(formatter, prefix, prefixLen)) {
+    if (prefix && !_vformat_append(formatter, prefix, prefixLen)) {
       return FALSE;
     }
 
-    if (!_osl_vformat_append_nchar(formatter, '0', padding_zero_count))
+    if (!_vformat_append_nchar(formatter, '0', padding_zero_count))
       return FALSE;
   }
   else {
-    if (prefix && !_osl_vformat_append(formatter, prefix, prefixLen)) {
+    if (prefix && !_vformat_append(formatter, prefix, prefixLen)) {
       return FALSE;
     }
-    if (!_osl_vformat_append_nchar(formatter, '0', padding_zero_count))
+    if (!_vformat_append_nchar(formatter, '0', padding_zero_count))
       return FALSE;
     padding_zero_count = 0;
   }
 
-  if (!_osl_vformat_append(formatter, digits, len))
+  if (!_vformat_append(formatter, digits, len))
     return FALSE;
 
   if (formatter->left_align) {
-    if (!_osl_vformat_append_nchar(formatter, ' ', padding_black_count + padding_zero_count))
+    if (!_vformat_append_nchar(formatter, ' ', padding_black_count + padding_zero_count))
       return FALSE;
   }
 
   return TRUE;
 }
 
-static ibool _osl_vformat_append_with_prefix_double(OslFormatter* formatter, const ichar* prefix, int prefixLen, const ichar* digits, intptr_t len) {
+static ibool _vformat_append_with_prefix_double(OslFormatter* formatter, const char* prefix, int prefixLen, const char* digits, intptr_t len) {
   
   intptr_t padding_zero_count = 0;
   intptr_t padding_black_count = formatter->width - len - prefixLen;
@@ -319,32 +196,32 @@ static ibool _osl_vformat_append_with_prefix_double(OslFormatter* formatter, con
       padding_zero_count = padding_black_count;
       padding_black_count = 0;
     }
-    if (!_osl_vformat_append_nchar(formatter, ' ', padding_black_count))
+    if (!_vformat_append_nchar(formatter, ' ', padding_black_count))
       return FALSE;
-    if (prefix && !_osl_vformat_append(formatter, prefix, prefixLen)) {
+    if (prefix && !_vformat_append(formatter, prefix, prefixLen)) {
       return FALSE;
     }
-    if (!_osl_vformat_append_nchar(formatter, '0', padding_zero_count))
+    if (!_vformat_append_nchar(formatter, '0', padding_zero_count))
       return FALSE;
   }
-  else if (prefix && !_osl_vformat_append(formatter, prefix, prefixLen)) {
+  else if (prefix && !_vformat_append(formatter, prefix, prefixLen)) {
     return FALSE;
   }
 
-  if (!_osl_vformat_append(formatter, digits, len))
+  if (!_vformat_append(formatter, digits, len))
     return FALSE;
 
   if (formatter->left_align) {
-    if (!_osl_vformat_append_nchar(formatter, ' ', padding_black_count))
+    if (!_vformat_append_nchar(formatter, ' ', padding_black_count))
       return FALSE;
   }
 
   return TRUE;
 }
 
-static ibool _osl_vformat_append_integer(OslFormatter* formatter, unsigned int base, ibool neg, const ichar* digits, intptr_t len) {
+static ibool _vformat_append_integer(OslFormatter* formatter, unsigned int base, ibool neg, const char* digits, intptr_t len) {
 
-  const ichar* prefix = NULL;
+  const char* prefix = NULL;
   int prefixLen = 0;
 
   if (base == 10) {
@@ -384,22 +261,22 @@ static ibool _osl_vformat_append_integer(OslFormatter* formatter, unsigned int b
     }
   }
 
-  return _osl_vformat_append_with_prefix(formatter, prefix, prefixLen, digits, len);
+  return _vformat_append_with_prefix(formatter, prefix, prefixLen, digits, len);
 }
  
-static ibool _osl_vformat_uint64(OslFormatter* formatter, uint64_t value, unsigned int base, ibool neg) {
-  const ichar* digits;
-  ichar* buf = formatter->tempbuf;
-  ichar* pos;
+static ibool _vformat_uint64(OslFormatter* formatter, uint64_t value, unsigned int base, ibool neg) {
+  const char* digits;
+  char* buf = formatter->tempbuf;
+  char* pos;
   intptr_t len;
   //If both the converted value and the precision are ?0? the conversion results in no characters.
   if (value == 0 && formatter->precision == 0)
-    return _osl_vformat_append_integer(formatter, base, neg, NULL, 0);
+    return _vformat_append_integer(formatter, base, neg, NULL, 0);
   if (formatter->specifieris_upper)
-    digits = _osl_digits_upper;
+    digits = _digits_upper;
   else
-    digits = _osl_digits_lower;
-  pos = buf + _OSL_NUMBER_BUFFER_LENGTH;
+    digits = _digits_lower;
+  pos = buf + NUMBER_BUFFER_LENGTH;
 
   if (base == 10) {
     for (;;) {
@@ -431,11 +308,11 @@ static ibool _osl_vformat_uint64(OslFormatter* formatter, uint64_t value, unsign
   else {
     return FALSE;
   }
-  len = buf + _OSL_NUMBER_BUFFER_LENGTH - pos + 1;
-  return _osl_vformat_append_integer(formatter, base, neg, pos, len);
+  len = buf + NUMBER_BUFFER_LENGTH - pos + 1;
+  return _vformat_append_integer(formatter, base, neg, pos, len);
 }
 
-static ibool _osl_vformat_int64(OslFormatter* formatter, int64_t value, unsigned int base) {
+static ibool _vformat_int64(OslFormatter* formatter, int64_t value, unsigned int base) {
   uint64_t val;
   ibool neg;
   if (value < 0) {
@@ -445,28 +322,28 @@ static ibool _osl_vformat_int64(OslFormatter* formatter, int64_t value, unsigned
     val = value; neg = FALSE;
   }
 
-  return _osl_vformat_uint64(formatter, val, base, neg);
+  return _vformat_uint64(formatter, val, base, neg);
 }
 
-static ibool _osl_vformat_append_string(OslFormatter* formatter, const ichar* sz, intptr_t len) {
+static ibool _vformat_append_string(OslFormatter* formatter, const char* sz, intptr_t len) {
   if (len < formatter->width) {
     if (!formatter->left_align) {
       intptr_t delta = formatter->width - len;
       while (delta) {
         delta--;
-        if (!_osl_vformat_append(formatter, " ", 1))
+        if (!_vformat_append(formatter, " ", 1))
           return FALSE;
       }
     }
   }
-  if (!_osl_vformat_append(formatter, sz, len))
+  if (!_vformat_append(formatter, sz, len))
     return FALSE;
   if (len < formatter->width) {
     if (formatter->left_align) {
       intptr_t delta = formatter->width - len;
       while (delta) {
         delta--;
-        if (!_osl_vformat_append(formatter, " ", 1))
+        if (!_vformat_append(formatter, " ", 1))
           return FALSE;
       }
     }
@@ -474,8 +351,8 @@ static ibool _osl_vformat_append_string(OslFormatter* formatter, const ichar* sz
   return TRUE;
 }
 
-static ibool _osl_vformat_append_double(OslFormatter* formatter, ibool neg, const ichar* digits, intptr_t len) {
-  const ichar* prefix = NULL;
+static ibool _vformat_append_double(OslFormatter* formatter, ibool neg, const char* digits, intptr_t len) {
+  const char* prefix = NULL;
   int prefixLen = 0;
 
   if (neg) {
@@ -491,10 +368,10 @@ static ibool _osl_vformat_append_double(OslFormatter* formatter, ibool neg, cons
     prefixLen = 1;
   }
 
-  return _osl_vformat_append_with_prefix_double(formatter, prefix, prefixLen, digits, len);
+  return _vformat_append_with_prefix_double(formatter, prefix, prefixLen, digits, len);
 }
 
-static ibool _osl_vformat_string(OslFormatter* formatter, const ichar* sz) {
+static ibool _vformat_string(OslFormatter* formatter, const char* sz) {
   intptr_t len;
   if (sz == NULL) {
     sz = "(null)";
@@ -503,17 +380,17 @@ static ibool _osl_vformat_string(OslFormatter* formatter, const ichar* sz) {
   if (formatter->precision >= 0 && len > formatter->precision) {
     len = formatter->precision;
   }
-  return _osl_vformat_append_string(formatter, sz, len);
+  return _vformat_append_string(formatter, sz, len);
 }
 
-static ichar* _osl_vformat_remove_trailing_zero_guard(const ichar* guard, const ichar* pos, ibool keepDot) {
+static char* _vformat_remove_trailing_zero_guard(const char* guard, const char* pos, ibool keepDot) {
   while (pos > guard && (*pos == '0')) {
     pos--;
   }
   if (!keepDot && *pos == '.') {
-    return (ichar*)pos;
+    return (char*)pos;
   }
-  return (ichar*)(pos + 1);
+  return (char*)(pos + 1);
 }
  
 /*
@@ -535,13 +412,13 @@ union ui64_f64 { uint64_t ui; float64_t f; };
 #define expF64UI( a ) ((int32_t) ((a)>>52) & 0x7FF)
 #define fracF64UI( a ) ((a) & UINT64_C( 0x000FFFFFFFFFFFFF ))
  
-static intptr_t _osl_hcvt_ieee754d64(OslFormatter* formatter, ichar* buf,
+static intptr_t _vformat_hcvt_ieee754d64(OslFormatter* formatter, char* buf,
   intptr_t  buf_count,
   double  value,
   int precision, int* prefix_len) {
     
   *prefix_len = 2; 
-  ichar* pos = buf;
+  char* pos = buf;
    
   if (value >= 0) {
     if (formatter->with_sign) {
@@ -654,9 +531,9 @@ static intptr_t _osl_hcvt_ieee754d64(OslFormatter* formatter, ichar* buf,
 #endif
 #endif 
   }
-  ichar tmp[32];
-  _osl_vformat_ultoa16(mantissa, tmp,formatter->specifieris_upper);
-  const ichar* tpos = tmp;
+  char tmp[32];
+  _vformat_u64toa16(mantissa, tmp,formatter->specifieris_upper);
+  const char* tpos = tmp;
 
   //int part
   if (exponent == -1023) {
@@ -698,15 +575,15 @@ static intptr_t _osl_hcvt_ieee754d64(OslFormatter* formatter, ichar* buf,
     *pos = '-';
     pos++;
   }
-  pos = _osl_vformat_utoa10(exponent, pos);
+  pos = _vformat_u32toa10(exponent, pos);
   *pos = 0;
   return pos-buf;
 }
 
-static intptr_t _osl_vformat_double_f(OslFormatter* formatter, ichar* buf, const ichar* cvt,
+static intptr_t _vformat_double_f(OslFormatter* formatter, char* buf, const char* cvt,
   int precision, ibool significant_precision, int dotpos, ibool trailingZeroes) {
-  ichar* pos = buf;
-  ichar* trailing_limit = buf;
+  char* pos = buf;
+  char* trailing_limit = buf;
   if (dotpos <= 0) {
     *pos = '0'; pos++;
   }
@@ -747,16 +624,16 @@ static intptr_t _osl_vformat_double_f(OslFormatter* formatter, ichar* buf, const
     }
   }
   else {
-    pos = _osl_vformat_remove_trailing_zero_guard(trailing_limit, pos - 1, formatter->alternate_form);
+    pos = _vformat_remove_trailing_zero_guard(trailing_limit, pos - 1, formatter->alternate_form);
   }
 
   return pos - buf;
 }
 
-static intptr_t _osl_vformat_double_e(OslFormatter* formatter, ichar* buf, const ichar* cvt,
+static intptr_t _vformat_double_e(OslFormatter* formatter, char* buf, const char* cvt,
   int precision, ibool significant_precision, int exponent, int dotpos, ibool trailingZeroes) {
-  intptr_t len = _osl_vformat_double_f(formatter, buf, cvt, precision, significant_precision, dotpos, trailingZeroes);
-  ichar* pos = buf + len;
+  intptr_t len = _vformat_double_f(formatter, buf, cvt, precision, significant_precision, dotpos, trailingZeroes);
+  char* pos = buf + len;
 
   *pos = formatter->specifieris_upper ? 'E' : 'e';
   pos++;
@@ -770,7 +647,7 @@ static intptr_t _osl_vformat_double_e(OslFormatter* formatter, ichar* buf, const
     exponent_len = 3;
   }
 
-  ichar* digits = pos + exponent_len - 1;
+  char* digits = pos + exponent_len - 1;
 
   for (;;) {
     *digits = exponent % 10 + '0';
@@ -787,10 +664,10 @@ static intptr_t _osl_vformat_double_e(OslFormatter* formatter, ichar* buf, const
 
 struct OslVFormatNan {
   int len;
-  ichar value[9];
+  char value[9];
 };
 
-static ibool _osl_vformat_nan(OslFormatter* formatter, int negative,int classification,ichar specifier) {
+static ibool _vformat_nan(OslFormatter* formatter, int negative,int classification,char specifier) {
   static const struct OslVFormatNan nan_value[] = {
      {3,"inf"},
      {3,"INF"}, 
@@ -808,9 +685,9 @@ static ibool _osl_vformat_nan(OslFormatter* formatter, int negative,int classifi
     if (formatter->specifieris_upper)
       nan_value_index++;
     const struct OslVFormatNan* nan = nan_value + nan_value_index;
-    const ichar* digits = nan->value;
+    const char* digits = nan->value;
     int digist_len = nan->len;
-    ichar* prefix = formatter->tempbuf;
+    char* prefix = formatter->tempbuf;
     if (negative) {
       *prefix = '-';
       prefix++;
@@ -865,13 +742,13 @@ static ibool _osl_vformat_nan(OslFormatter* formatter, int negative,int classifi
     }
     formatter->padding_zero = FALSE;
     formatter->prefix_blank = FALSE;
-    return _osl_vformat_append_with_prefix_double(formatter, prefix, prefix_len, digits, digist_len); 
+    return _vformat_append_with_prefix_double(formatter, prefix, prefix_len, digits, digist_len); 
    
 }
 
-extern int osl_convert_ieee754d64(ichar* buf, int buflen, double val, ichar specifier, int precision, int* pexp, int* pdotpos, ichar* pgret);
+extern int ieee754d64tos(double value, char* buf, int buflen,   char specifier, int precision, int* pexp, int* pdotpos, char* pgret);
 
-static ibool _osl_vformat_ieee754d64(OslFormatter* formatter, double value, ichar specifier) {
+static ibool _vformat_ieee754d64(OslFormatter* formatter, double value, char specifier) {
    
   union ui64_f64 ua;
   ua.f = value;
@@ -911,49 +788,49 @@ static ibool _osl_vformat_ieee754d64(OslFormatter* formatter, double value, icha
 #endif
 
     }  
-    return _osl_vformat_nan(formatter, negative, classification, specifier);
+    return _vformat_nan(formatter, negative, classification, specifier);
   }  
 
   int precision;
   intptr_t len = 0;
   int exponent10;
   int dotpos;
-  ichar gspecifier;
-  ichar cvtbuf[_OSL_NUMBER_BUFFER_LENGTH + 1];
+  char gspecifier;
+  char cvtbuf[NUMBER_BUFFER_LENGTH + 1];
 
   switch (specifier) {
   case 'a':
     do{ 
       int prefix_len;
       precision = formatter->precision >= 0 ? formatter->precision : 13;
-      len = _osl_hcvt_ieee754d64(formatter, formatter->tempbuf,
-        _OSL_NUMBER_BUFFER_LENGTH, value, precision, &prefix_len);
+      len = _vformat_hcvt_ieee754d64(formatter, formatter->tempbuf,
+        NUMBER_BUFFER_LENGTH, value, precision, &prefix_len);
       if (len <0)
         return FALSE; 
       if (len >= formatter->width || formatter->left_align)
-        return _osl_vformat_append_string(formatter, formatter->tempbuf, len);
+        return _vformat_append_string(formatter, formatter->tempbuf, len);
       else {
         if (formatter->padding_zero) {
-          if (!_osl_vformat_append(formatter, formatter->tempbuf, prefix_len))
+          if (!_vformat_append(formatter, formatter->tempbuf, prefix_len))
             return FALSE;
-          if (!_osl_vformat_append_nchar(formatter, '0', formatter->width - len))
+          if (!_vformat_append_nchar(formatter, '0', formatter->width - len))
             return FALSE;
         }
         else {
-          if (!_osl_vformat_append_nchar(formatter, ' ', formatter->width - len))
+          if (!_vformat_append_nchar(formatter, ' ', formatter->width - len))
             return FALSE;
-          if (!_osl_vformat_append(formatter, formatter->tempbuf, prefix_len))
+          if (!_vformat_append(formatter, formatter->tempbuf, prefix_len))
             return FALSE;
         }
-        return _osl_vformat_append(formatter, formatter->tempbuf + prefix_len, len - prefix_len);
+        return _vformat_append(formatter, formatter->tempbuf + prefix_len, len - prefix_len);
       }
     }while (0);
   case 'e':
     precision = formatter->precision >= 0 ? formatter->precision : 6;
-    osl_convert_ieee754d64(cvtbuf, _OSL_NUMBER_BUFFER_LENGTH, value, 'e',
+    ieee754d64tos(value, cvtbuf, NUMBER_BUFFER_LENGTH,   'e',
       precision, &exponent10, &dotpos, NULL);
      
-    len = _osl_vformat_double_e(
+    len = _vformat_double_e(
       formatter,
       formatter->tempbuf,
       cvtbuf,
@@ -961,9 +838,9 @@ static ibool _osl_vformat_ieee754d64(OslFormatter* formatter, double value, icha
     break;
   case 'f':
     precision = (formatter->precision >= 0 ? formatter->precision : 6);
-    osl_convert_ieee754d64(cvtbuf, _OSL_NUMBER_BUFFER_LENGTH, value, 'f', 
+    ieee754d64tos(value, cvtbuf, NUMBER_BUFFER_LENGTH,  'f',
       precision, &exponent10, &dotpos, NULL);
-    len = _osl_vformat_double_f(
+    len = _vformat_double_f(
       formatter,
       formatter->tempbuf,
       cvtbuf,
@@ -979,7 +856,7 @@ static ibool _osl_vformat_ieee754d64(OslFormatter* formatter, double value, icha
     precision = (formatter->precision >= 0 ? formatter->precision : 6);
     if (precision == 0)
       precision = 1;
-    osl_convert_ieee754d64(cvtbuf, _OSL_NUMBER_BUFFER_LENGTH, value, 'g', 
+    ieee754d64tos(value, cvtbuf, NUMBER_BUFFER_LENGTH,'g',
       precision, &exponent10, &dotpos, &gspecifier);
     //'#' For g and G
     //  conversions, trailing zeros are not removed from the
@@ -988,14 +865,14 @@ static ibool _osl_vformat_ieee754d64(OslFormatter* formatter, double value, icha
     //Style e is used if the exponent from its conversion is less than -4 
     // or greater than or equal to the precision.
     if (gspecifier == 'e') {//if ((exp < -4 || (exp >= precision))) {
-      len = _osl_vformat_double_e(
+      len = _vformat_double_e(
         formatter,
         formatter->tempbuf,
         cvtbuf,
         precision, TRUE, exponent10, dotpos, formatter->alternate_form);
     }
     else {
-      len = _osl_vformat_double_f(
+      len = _vformat_double_f(
         formatter,
         formatter->tempbuf,
         cvtbuf,
@@ -1005,12 +882,12 @@ static ibool _osl_vformat_ieee754d64(OslFormatter* formatter, double value, icha
   default:
     return FALSE;
   } 
-  return _osl_vformat_append_double(formatter, value < 0, formatter->tempbuf, len);
+  return _vformat_append_double(formatter, value < 0, formatter->tempbuf, len);
 }
 
-static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat, va_list argptr) {
-  const ichar* psz;
-  const ichar* start;
+static intptr_t _vformat_impl(OslFormatter* formatter, const char* szformat, va_list argptr) {
+  const char* psz;
+  const char* start;
 
   psz = szformat;
   start = psz;
@@ -1023,13 +900,13 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
     }
 
     if (*psz == 0) {
-      if (!_osl_vformat_append(formatter, start, psz - start))
+      if (!_vformat_append(formatter, start, psz - start))
         return -1;
       break;
     }
     psz++;
     if (*psz == '%') {
-      if (!_osl_vformat_append(formatter, start, psz - start))
+      if (!_vformat_append(formatter, start, psz - start))
         return -1;
       psz++;
       start = psz;
@@ -1037,7 +914,7 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
     }
 
     if ((psz - start - 1) > 0
-      && !_osl_vformat_append(formatter, start, psz - start - 1))
+      && !_vformat_append(formatter, start, psz - start - 1))
       return -1;
 
     formatter->left_align = FALSE;
@@ -1175,11 +1052,11 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
 
     uint64_t i_val;
     int64_t u_val;
-    ichar char_val;
+    char char_val;
     switch (*psz) {
     case 'c':
       char_val = va_arg(argptr, int);
-      if (!_osl_vformat_append(formatter, &char_val, 1))
+      if (!_vformat_append(formatter, &char_val, 1))
         return -1;
       break;
     case 'd':
@@ -1204,7 +1081,7 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
         return -1;
       }
 
-      if (!_osl_vformat_int64(formatter, i_val, 10))
+      if (!_vformat_int64(formatter, i_val, 10))
         return -1;
       break;
     case 'u':
@@ -1230,7 +1107,7 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
         return -1;
       }
 
-      if (!_osl_vformat_uint64(formatter, u_val, 10, FALSE))
+      if (!_vformat_uint64(formatter, u_val, 10, FALSE))
         return -1;
       break;
     case 'o':
@@ -1256,7 +1133,7 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
         return -1;
       }
 
-      if (!_osl_vformat_uint64(formatter, u_val, 8, FALSE))
+      if (!_vformat_uint64(formatter, u_val, 8, FALSE))
         return -1;
       break;
     case 'X':
@@ -1284,27 +1161,27 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
         return -1;
       }
 
-      if (!_osl_vformat_uint64(formatter, u_val, 16, FALSE))
+      if (!_vformat_uint64(formatter, u_val, 16, FALSE))
         return -1;
       break;
     case 'p':
       //Pointer address
-#ifdef _OSL_WINDOWS
+#ifdef _OS_WINDOWS
       formatter->specifieris_upper = TRUE;
-#else // !_OSL_WINDOWS
+#else // !_OS_WINDOWS
       formatter->extra_flag = TRUE;
       formatter->specifieris_upper = FALSE;
-#endif // _OSL_WINDOWS
+#endif // _OS_WINDOWS
       formatter->with_sign = FALSE;
       formatter->padding_zero = TRUE;
       if (sizeof(void*) == sizeof(uint64_t)) {
         formatter->width = 16;
-        if (!_osl_vformat_uint64(formatter, va_arg(argptr, uint64_t), 16, FALSE))
+        if (!_vformat_uint64(formatter, va_arg(argptr, uint64_t), 16, FALSE))
           return -1;
       }
       else {
         formatter->width = 8;
-        if (!_osl_vformat_uint64(formatter, va_arg(argptr, unsigned int), 16, FALSE))
+        if (!_vformat_uint64(formatter, va_arg(argptr, unsigned int), 16, FALSE))
           return -1;
       }
       break;
@@ -1318,7 +1195,7 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
     case 'f':
       if (dot_without_precision)
         formatter->precision = 0;
-      if (!_osl_vformat_ieee754d64(formatter, va_arg(argptr, double), 'f'))
+      if (!_vformat_ieee754d64(formatter, va_arg(argptr, double), 'f'))
         return -1;
       break;
     case 'E':
@@ -1326,7 +1203,7 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
     case 'e':
       if (dot_without_precision)
         formatter->precision = 0;
-      if (!_osl_vformat_ieee754d64(formatter, va_arg(argptr, double), 'e'))
+      if (!_vformat_ieee754d64(formatter, va_arg(argptr, double), 'e'))
         return -1;
       break;
     case 'G':
@@ -1334,7 +1211,7 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
     case 'g':
       if (dot_without_precision)
         formatter->precision = 0;
-      if (!_osl_vformat_ieee754d64(formatter, va_arg(argptr, double), 'g'))
+      if (!_vformat_ieee754d64(formatter, va_arg(argptr, double), 'g'))
         return -1;
       break;
     case 'A'://Hexadecimal floating point, uppercase
@@ -1342,12 +1219,12 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
     case 'a'://Hexadecimal floating point, lowercase
       if (dot_without_precision)
         formatter->precision = 0;
-      if (!_osl_vformat_ieee754d64(formatter, va_arg(argptr, double), 'a'))
+      if (!_vformat_ieee754d64(formatter, va_arg(argptr, double), 'a'))
         return -1;
       break;
     case 'S':
     case 's':
-      if (!_osl_vformat_string(formatter, va_arg(argptr, const ichar*)))
+      if (!_vformat_string(formatter, va_arg(argptr, const char*)))
         return -1;
       break;
 
@@ -1360,356 +1237,4 @@ static intptr_t _osl_vformat_impl(OslFormatter* formatter, const ichar* szformat
   }
   return formatter->count;
 }
-
-//test test test test
-
-static void _osl_make_format_string(ichar* format, const ichar* flags, int width, int precision, ichar fmt) {
-  ichar* start = format;
-  *format = '%';
-  format++;
-  if (flags) {
-    size_t len = strlen(flags);
-    memcpy(format, flags, len * sizeof(ichar));
-    format += strlen(flags);
-  }
-  if (width >= 0) {
-    format = _osl_vformat_utoa10(width, format);
-  }
-  if (precision >= 0) {
-    *format = '.';
-    format++;
-    format = _osl_vformat_utoa10(precision, format);
-  }
-  *format = fmt;
-  format++;
-  *format = 0;
-  assert((format - start) < 256);
-}
-
-int sys_vsnprintf(ichar* buffer, intptr_t count, const ichar* format, va_list ap) {
-  int rv;
-#ifdef _OSL_WINDOWS
-  rv = _vsnprintf_s(buffer, count, count, format, ap);
-  if (rv <= 0) {
-    buffer[0] = 0;
-  }
-  else if (rv == count) {
-    rv = (int)(count - 1);
-    buffer[rv] = 0;
-  }
-#else // !_OSL_WINDOWS
-  rv = vsnprintf(buffer, count, format, ap);
-#endif // _OSL_WINDOWS
-  return rv;
-}
-
-int _osl_cmp_snprintf(const ichar* format, ...) {
-  ichar buffer1[512];
-  ichar buffer2[512];
-  va_list argptr1;
-  va_list argptr2;
-  va_list argptr3;
-  va_start(argptr1, format);
-  va_copy(argptr2, argptr1);
-  va_copy(argptr3, argptr1);
-  sys_vsnprintf(buffer1, 512, format, argptr1);
-  osl_vsnprintf(buffer2, 512, format, argptr2);
-  va_end(argptr1);
-  va_end(argptr2);
-
-  if (strcmp(buffer1, buffer2) == 0) {
-    va_end(argptr3);
-    return TRUE;
-  }
-  printf("fmt:'%s',sys:%zd,%zd\n'%-s'\n'%-s'\n", format, strlen(buffer1), strlen(buffer2), buffer1, buffer2);
-  //for debug code trace.
-  osl_vsnprintf(buffer2, 512, format, argptr3);
-  va_end(argptr3);
-  return FALSE;
-}
-
-const ichar* fmt_flags = " 0#-+";
-const ichar** all_fmt_flags = NULL;
-int all_fmt_flag_count = 0;
-const int max_width = 30;
-const int max_precision = 40;
-
-static int  osl_build_all_fmt_flags() {
-  if (all_fmt_flags != NULL) {
-    return all_fmt_flag_count;
-  }
-  int fmt_flags_len = 5;
-  all_fmt_flag_count = 1 + 5 + 10 + 10 + 5 + 1;
-  int buf_size = (all_fmt_flag_count + 1) * 6;
-  ichar* buf = (ichar*)malloc(buf_size);
-  ichar* pos = buf;
-  const ichar** all_flags = (ichar**)malloc(sizeof(ichar*) * all_fmt_flag_count);
-  all_fmt_flags = all_flags;
-  all_flags[0] = NULL;
-  int n = 1;
-  for (int i = 0; i < 5; i++) {
-    all_flags[n] = pos;
-    n++;
-    *pos = fmt_flags[i];
-    pos++;
-    *pos = 0;
-    pos++;
-  }
-
-  for (int i = 0; i < 5; i++) {
-    for (int j = i + 1; j < 5; j++) {
-      all_flags[n] = pos;
-      *pos = fmt_flags[i];
-      pos++;
-      *pos = fmt_flags[j];
-      pos++;
-      *pos = 0;
-      pos++;
-      n++;
-    }
-  }
-  for (int i = 0; i < 5; i++) {
-    for (int j = i + 1; j < 5; j++) {
-      for (int k = j + 1; k < 5; k++) {
-        all_flags[n] = pos;
-        *pos = fmt_flags[i];
-        pos++;
-        *pos = fmt_flags[j];
-        pos++;
-        *pos = fmt_flags[k];
-        pos++;
-        *pos = 0;
-        pos++;
-        n++;
-      }
-    }
-  }
-
-  for (int i = 0; i < 5; i++) {
-    for (int j = i + 1; j < 5; j++) {
-      for (int k = j + 1; k < 5; k++) {
-        for (int l = k + 1; l < 5; l++) {
-          all_flags[n] = pos;
-          *pos = fmt_flags[i];
-          pos++;
-          *pos = fmt_flags[j];
-          pos++;
-          *pos = fmt_flags[k];
-          pos++;
-          *pos = fmt_flags[l];
-          pos++;
-          *pos = 0;
-          pos++;
-          n++;
-        }
-      }
-    }
-  }
-  all_flags[n] = fmt_flags;
-  n++;
-  assert(n == all_fmt_flag_count);
-  assert((pos - buf) <= buf_size);
-  // all_fmt_flag_count = n;
-  return all_fmt_flag_count;
-}
-
-const ichar* int_formats = "oxXidu";
-void _osl_printf_test_int(int value) {
-  ichar format[256];
-  int flags_count = osl_build_all_fmt_flags();
-  const ichar* fpos = int_formats;
-  while (*fpos) {
-    for (int i = 0; i < flags_count; i++) {
-      _osl_make_format_string(format, all_fmt_flags[i], -1, -1, *fpos);
-      _osl_cmp_snprintf(format, value);
-    }
-    fpos++;
-  }
-  fpos = int_formats;
-  while (*fpos) {
-    for (int i = 0; i < flags_count; i++) {
-      for (int width = 0; width < max_width; width++) {
-        for (int precision = 0; precision < max_precision; precision++) {
-          _osl_make_format_string(format, all_fmt_flags[i], width, precision, *fpos);
-          _osl_cmp_snprintf(format, value);
-        }
-      }
-    }
-    fpos++;
-  }
-}
-
-const ichar* double_formats = "aefg";
-void _osl_printf_test_double(double value) {
-  ichar format[256];
-  int flags_count = osl_build_all_fmt_flags();
-  const ichar* fpos = double_formats; 
-  while (*fpos) {
-    for (int i = 0; i < flags_count; i++) {
-      _osl_make_format_string(format, all_fmt_flags[i], -1, -1, *fpos);
-      _osl_cmp_snprintf(format, value);
-    }
-    fpos++;
-  }
-  fpos = double_formats;
-  while (*fpos) {
-    for (int i = 0; i < flags_count; i++) {
-      for (int width = 0; width < max_width; width++) {
-        for (int precision = 0; precision < max_precision; precision++) {
-          _osl_make_format_string(format, all_fmt_flags[i], width, precision, *fpos);
-          _osl_cmp_snprintf(format, value);
-        }
-      }
-    }
-    fpos++;
-  }
-  //test_calc_f64(value);
-}
  
-//static const union { unsigned long __i[1]; float __d; } __Nanf = {0x7FC00000};
-void osl_format_test_impl() { 
-#ifdef _DEBUG
-#define RUN_COUNT 0
-#else 
-#define RUN_COUNT 100000
-#endif
-
-  double float_val[] = {
-    0,
-#ifdef NAN
-   NAN,
-   -NAN,
-   INFINITY,
-   -INFINITY,
-#endif//NAN
-#ifdef DBL_MAX
-   DBL_TRUE_MIN,
-   FLT_TRUE_MIN,
-   DBL_MAX,
-   DBL_MIN,
-   DBL_EPSILON,
-   FLT_MAX,
-   FLT_MIN,
-   FLT_EPSILON,
-#endif//NAN
-   1.5e-40,
-   1.5e-200,
-   1.0e+40,
-   1.0e-40,
-   1.0 / 3.0,
-   2.0 / 3.0,
-
-   -4.136,
-   -134.52,
-   -5.04030201,
-   -3410.01234,
-   -999999.999999,
-   -913450.29876,
-   -913450.2,
-   -91345.2,
-   -9134.2,
-   -913.2,
-   -91.2,
-   -9.2,
-   -9.9,
-   4.136,
-   134.52,
-   5.04030201,
-   3410.01234,
-   999999.999999,
-   913450.29876,
-   913450.2,
-   91345.2,
-   9134.2,
-   913.2,
-   91.2,
-   9.2,
-   9.9,
-   9.96,
-   9.996,
-   9.9996,
-   9.99996,
-   9.999996,
-   9.9999996,
-   9.99999996,
-   0.99999996,
-   0.99999999,
-   0.09999999,
-   0.00999999,
-   0.00099999,
-   0.00009999,
-   0.00000999,
-   0.00000099,
-   0.00000009,
-   0.00000001,
-   0.0000001,
-   0.000001,
-   0.00001,
-   0.0001,
-   0.001,
-   0.01,
-   0.1,
-   1.0,
-   1.5,
-   -1.5,
-   -1.0,
-   -0.1,
-  };
- 
-#if RUN_COUNT != 0
-  ichar buffer[256];
-  int64_t t1 = osl_get_timer();
-  for (int j = 0; j < RUN_COUNT; j++) {
-    for (size_t i = 0; i < sizeof(float_val) / sizeof(float_val[0]); i++) {
-      osl_snformat(buffer, 256, "%.17e", float_val[i]);
-      osl_snformat(buffer, 256, "%.17f", float_val[i]);
-      osl_snformat(buffer, 256, "%.17g", float_val[i]);
-    } 
-  }
-  t1 = osl_get_timer() - t1;
-
-  int64_t t2 = osl_get_timer();
-  for (int j = 0; j < RUN_COUNT; j++) {
-    for (size_t i = 0; i < sizeof(float_val) / sizeof(float_val[0]); i++) {
-      snprintf(buffer, 256, "%.17e", float_val[i]);
-      snprintf(buffer, 256, "%.17f", float_val[i]);
-      snprintf(buffer, 256, "%.17g", float_val[i]);
-    } 
-  }
-  t2 = osl_get_timer() - t2; 
-  osl_printf("my:%ld,sys:%ld\n", t1, t2);
-#endif //RUN_COUNT != 0 
-
-
-  for (size_t i = 0; i < sizeof(float_val) / sizeof(float_val[0]); i++) {
-    _osl_printf_test_double(float_val[i]);
-  }
-
-  int int_val[] = {
-#ifdef INT_MAX
-    INT_MAX,
-#endif	/* LONG_MAX */
-#ifdef INT_MIN
-    INT_MIN,
-#endif	/* LONG_MIN */
-    - 91340,
-    91340,
-    341,
-    134,
-    0203,
-    -1,
-    1,
-    0
-  };
-
-  for (size_t i = 0; i < sizeof(int_val) / sizeof(int_val[0]); i++) {
-    _osl_printf_test_int(int_val[i]);
-  } 
-}
-
-void osl_format_test() {  
-  osl_format_test_impl();  
-  printf("\nprint nothing is ok.\n");
-}
-
-
